@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XoXo Révision - Stats Complètes</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+      }
+    }
+  </script>
+
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    @keyframes gradient-bg { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    .animated-bg { background: linear-gradient(-45deg, #ff9a9e, #fecfef, #a1c4fd, #c2e9fb); background-size: 400% 400%; animation: gradient-bg 15s ease infinite; min-height: 100vh; }
+    .glass-panel { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1); }
+    .glass-header { background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.4); }
+    @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-in { animation: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    
+    /* Scrollbar personnalisée */
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.3); border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.4); border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.8); }
+  </style>
+</head>
+<body class="text-stone-800 antialiased font-sans">
+  <div id="root"></div>
+
+  <script>
+    window.storage = {
+      get: async (key) => { const v = localStorage.getItem(key); return v ? { value: v } : null; },
+      set: async (key, val) => localStorage.setItem(key, val),
+      delete: async (key) => localStorage.removeItem(key)
+    };
+  </script>
+
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useMemo } from "react";
+    import { createRoot } from "react-dom/client";
+    import {
+      Upload, FileText, Bookmark, RotateCcw, CheckCircle2, XCircle, AlertCircle, 
+      BarChart3, Sparkles, ArrowRight, Trash2, Home, Loader2, Award, Settings2, 
+      TrendingDown, Target, ShieldAlert, GraduationCap, Type, HelpCircle, 
+      ClipboardList, PieChart, PenTool, BookOpen, FileEdit
+    } from "lucide-react";
+
+    const STOP_WORDS = ["cependant", "néanmoins", "toutefois", "généralement", "également", "vraiment", "toujours", "parfois", "souvent", "beaucoup", "quelques", "plusieurs", "comment", "pourquoi", "quand", "parce", "puisque", "lorsque", "depuis", "d'autres", "certains", "certaines", "différents", "exemple", "exemples"];
+
+    // ============ COMPOSANT DONUT CHART ============
+    function DonutChart({ percentage, colorClass, trailColor, label }) {
+      const radius = 45;
+      const circumference = 2 * Math.PI * radius;
+      const safePercentage = isNaN(percentage) ? 0 : Math.max(0, Math.min(100, percentage));
+      const offset = circumference - (safePercentage / 100) * circumference;
+
+      return (
+        <div className="flex flex-col items-center relative group hover:scale-105 transition-transform duration-300">
+          <div className="relative w-32 h-32 flex items-center justify-center">
+            <svg className="w-full h-full transform -rotate-90 drop-shadow-sm">
+              <circle cx="64" cy="64" r={radius} stroke="currentColor" strokeWidth="10" fill="transparent" className={trailColor || "text-indigo-100/50"} />
+              <circle cx="64" cy="64" r={radius} stroke="currentColor" strokeWidth="10" fill="transparent" 
+                className={`${colorClass} transition-all duration-1000 ease-out`} 
+                strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className={`text-3xl font-black ${colorClass}`}>{safePercentage}%</span>
+            </div>
+          </div>
+          <span className="mt-4 font-bold text-sm text-indigo-900 uppercase tracking-widest text-center">{label}</span>
+        </div>
+      );
+    }
+
+    function RevisionApp() {
+      const [view, setView] = useState("home"); 
+      const [pdfFile, setPdfFile] = useState(null);
+      const [axes, setAxes] = useState([]); 
+      const [progress, setProgress] = useState({});
+      const [questions, setQuestions] = useState([]);
+      const [examQuestions, setExamQuestions] = useState([]);
+      const [currentQuiz, setCurrentQuiz] = useState(null);
+      const [currentExam, setCurrentExam] = useState(null);
+      const [history, setHistory] = useState([]);
+      const [error, setError] = useState(null);
+      const [loadingMsg, setLoadingMsg] = useState("");
+      const [extractionMode, setExtractionMode] = useState(null);
+      
+      const [quizConfigModal, setQuizConfigModal] = useState(null);
+
+      const EMOJIS = ["📚", "🔬", "🌍", "💡", "⚙️", "📊", "🧠", "🎯", "🔥", "✨"];
+
+      useEffect(() => {
+        (async () => {
+          try {
+            const saved = await window.storage.get("revision_state_v8");
+            if (saved) {
+              const state = JSON.parse(saved.value);
+              if (state.questions && state.questions.length > 0) {
+                setPdfFile({ name: state.fileName || "document.pdf" });
+                setAxes(state.axes || []);
+                setProgress(state.progress || {});
+                setQuestions(state.questions || []);
+                setExamQuestions(state.examQuestions || []);
+                setHistory(state.history || []);
+                setExtractionMode(state.extractionMode || 'auto');
+                if ((state.axes || []).length > 0) setView("dashboard");
+              }
+            }
+          } catch (e) {}
+        })();
+      }, []);
+
+      const saveState = async (updates = {}) => {
+        try {
+          const state = { fileName: pdfFile?.name, axes, progress, questions, examQuestions, history, extractionMode, ...updates };
+          await window.storage.set("revision_state_v8", JSON.stringify(state));
+        } catch (e) {}
+      };
+
+      // ============ EXTRACTION DU PDF ============
+      const handleFileUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        if (file.type !== "application/pdf") { setError("Veuillez uploader un fichier PDF."); return; }
+        setError(null); setPdfFile(file); setView("loading");
+        
+        try {
+          if (!window.pdfjsLib) {
+            await new Promise((res, rej) => {
+              const script = document.createElement("script");
+              script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+              script.onload = res;
+              document.head.appendChild(script);
+            });
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          }
+
+          setLoadingMsg("Analyse de la structure du document...");
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          
+          let chaptersList = [];
+          try {
+            const outline = await pdf.getOutline();
+            if (outline && outline.length > 0) {
+              for (let i = 0; i < Math.min(outline.length, 12); i++) {
+                const item = outline[i];
+                let dest = item.dest;
+                if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+                if (Array.isArray(dest)) {
+                  try {
+                    const pageIndex = await pdf.getPageIndex(dest[0]);
+                    let cleanTitle = item.title.replace(/[\r\n]+/g, ' ').trim();
+                    if (cleanTitle.length > 40) cleanTitle = cleanTitle.substring(0, 40) + "...";
+                    chaptersList.push({ title: cleanTitle, startPage: pageIndex + 1, text: "" });
+                  } catch(e) {}
+                }
+              }
+            }
+          } catch(e) {}
+
+          chaptersList.sort((a, b) => a.startPage - b.startPage);
+          chaptersList = chaptersList.filter((ch, i, arr) => i === 0 || ch.startPage !== arr[i-1].startPage);
+
+          const hasValidOutline = chaptersList.length > 1;
+          const currentMode = hasValidOutline ? 'outline' : 'auto';
+          setExtractionMode(currentMode);
+
+          if (hasValidOutline && chaptersList[0].startPage > 1) {
+            chaptersList.unshift({ title: "Introduction / Préambule", startPage: 1, text: "" });
+          } else if (!hasValidOutline) {
+            const pagesPerChapter = Math.max(2, Math.ceil(pdf.numPages / 5));
+            for(let p = 1; p <= pdf.numPages; p += pagesPerChapter) {
+              chaptersList.push({ title: `Partie ${(p-1)/pagesPerChapter + 1}`, startPage: p, text: "" });
+            }
+          }
+
+          let currentChapIdx = 0;
+          const newAxes = [];
+          const generatedQuestions = [];
+          const generatedExams = [];
+          const initProgress = {};
+
+          for (let i = 1; i <= pdf.numPages; i++) {
+            setLoadingMsg(`Lecture de la page ${i}/${pdf.numPages}...`);
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const pageText = content.items.map(it => it.str).join(" ") + "\n";
+
+            if (currentChapIdx < chaptersList.length - 1 && i >= chaptersList[currentChapIdx + 1].startPage) {
+              currentChapIdx++;
+            }
+            chaptersList[currentChapIdx].text += pageText;
+          }
+
+          setLoadingMsg("Création des sujets d'examen...");
+          let axisCounter = 0;
+
+          for (let i = 0; i < chaptersList.length; i++) {
+            const chap = chaptersList[i];
+            if (chap.text.trim().length > 100) {
+              const axisId = `chap_${axisCounter}`;
+              const endPage = (i < chaptersList.length - 1) ? chaptersList[i+1].startPage - 1 : pdf.numPages;
+              const desc = chap.startPage === endPage ? `Page ${chap.startPage}` : `Pages ${chap.startPage} à ${endPage}`;
+
+              newAxes.push({ id: axisId, title: chap.title, desc: desc, emoji: EMOJIS[axisCounter % EMOJIS.length] });
+              initProgress[axisId] = { correct: 0, total: 0, mastery: 0 };
+              
+              const { qs, exams } = generateQuestionsAndExams(chap.text, axisId);
+              generatedQuestions.push(...qs);
+              generatedExams.push(...exams);
+              axisCounter++;
+            }
+          }
+
+          if (generatedQuestions.length === 0) throw new Error("Impossible d'extraire des concepts de ce PDF.");
+
+          setAxes(newAxes); setProgress(initProgress); setQuestions(generatedQuestions); setExamQuestions(generatedExams);
+          await saveState({ fileName: file.name, axes: newAxes, progress: initProgress, questions: generatedQuestions, examQuestions: generatedExams, history: [], extractionMode: currentMode });
+          setView("dashboard");
+
+        } catch (err) {
+          setError("Erreur : " + err.message); setView("home");
+        }
+      };
+
+      const generateQuestionsAndExams = (text, axisId) => {
+        const cleanText = text.replace(/\s+/g, ' ');
+        const sentences = cleanText.split(/(?<=[.!?])\s+/);
+        const validSentences = sentences.filter(s => s.length > 50 && s.length < 250 && !s.includes("..."));
+        
+        const rawWords = cleanText.match(/\b[a-zA-Zàâçéèêëîïôûùüÿñæœ]{7,}\b/gi) || ["concept", "théorie", "analyse"];
+        const validWords = rawWords.map(w => w.toLowerCase()).filter(w => !STOP_WORDS.includes(w));
+        const uniqueWords = [...new Set(validWords)];
+
+        // Création des questions classiques (Quiz)
+        const qs = [];
+        const shuffledSentences = validSentences.sort(() => 0.5 - Math.random());
+
+        for (let i = 0; i < Math.min(15, validSentences.length); i++) {
+          const sentence = shuffledSentences[i];
+          const wordsInSentence = sentence.match(/\b[a-zA-Zàâçéèêëîïôûùüÿñæœ]{7,}\b/gi);
+          if (!wordsInSentence) continue;
+
+          const validWordsInSentence = wordsInSentence.filter(w => !STOP_WORDS.includes(w.toLowerCase()));
+          if (validWordsInSentence.length === 0) continue;
+
+          const targetWord = validWordsInSentence[Math.floor(Math.random() * validWordsInSentence.length)];
+          
+          const distractors = [];
+          while (distractors.length < 5 && uniqueWords.length > 5) {
+            const randomWord = uniqueWords[Math.floor(Math.random() * uniqueWords.length)];
+            if (randomWord !== targetWord.toLowerCase() && !distractors.includes(randomWord)) distractors.push(randomWord);
+          }
+
+          qs.push({
+            id: `q_${axisId}_${i}_${Date.now()}`, axisId: axisId, sentence: sentence.trim(),
+            targetWord: targetWord, distractors: distractors, timesAsked: 0, timesCorrect: 0
+          });
+        }
+
+        // Création des sujets d'EXAMEN
+        const freqs = {};
+        validWords.forEach(w => freqs[w] = (freqs[w] || 0) + 1);
+        const topConcepts = Object.keys(freqs).sort((a,b) => freqs[b] - freqs[a]).slice(0, 3);
+
+        const exams = topConcepts.map((concept, idx) => {
+            const relevantSentences = validSentences.filter(s => s.toLowerCase().includes(concept)).slice(0, 4);
+            const templates = [
+                `Analysez les enjeux et l'impact de la notion de « ${concept} » dans le cadre de ce chapitre.`,
+                `Dans quelle mesure le concept de « ${concept} » est-il central pour comprendre ce sujet ?`,
+                `Discutez des différentes dimensions et implications de : « ${concept} ».`
+            ];
+            return {
+                id: `exam_${axisId}_${idx}`, axisId: axisId, concept: concept,
+                question: templates[idx % templates.length], references: relevantSentences
+            };
+        });
+
+        return { qs, exams };
+      };
+
+      // ============ LOGIQUE DU QUIZ CLASSIQUE ============
+      const startQuiz = (axisId, difficulty, format) => {
+        let pool = axisId ? questions.filter(q => q.axisId === axisId) : [...questions];
+        if (pool.length === 0) { setError("Pas de questions pour cette partie."); setQuizConfigModal(null); return; }
+
+        pool = pool.sort(() => 0.5 - Math.random()).slice(0, 5);
+
+        let allowedTypes = [];
+        if (format === 'qcm') allowedTypes = ['qcm', 'tf'];
+        else if (format === 'input') allowedTypes = ['input'];
+        else allowedTypes = ['qcm', 'tf', 'input'];
+
+        const formattedQuestions = pool.map(q => {
+            const qType = allowedTypes[Math.floor(Math.random() * allowedTypes.length)];
+            const targetWord = q.targetWord;
+            let finalQ = { ...q, type: qType, explanation: `La notion clé ciblée dans ce chapitre est : "${targetWord}".` };
+
+            if (qType === 'qcm') {
+                let numDistractors = difficulty === 'debutant' ? 1 : difficulty === 'intermediaire' ? 3 : 5;
+                const selectedDistractors = q.distractors.slice(0, numDistractors);
+                const options = [targetWord, ...selectedDistractors].sort(() => 0.5 - Math.random());
+                
+                finalQ.question = `Complétez l'extrait suivant :\n\n« ${q.sentence.replace(new RegExp(`\\b${targetWord}\\b`, 'gi'), "_______")} »`;
+                finalQ.options = options;
+                finalQ.correctIndex = options.indexOf(targetWord);
+            } 
+            else if (qType === 'tf') {
+                const isTrue = Math.random() > 0.5;
+                const blankedSentence = q.sentence.replace(new RegExp(`\\b${targetWord}\\b`, 'gi'), "_______");
+                if (isTrue) {
+                    finalQ.question = `Vrai ou Faux ?\nLe mot manquant dans cet extrait est bien « ${targetWord} » :\n\n« ${blankedSentence} »`;
+                    finalQ.correctValue = true;
+                } else {
+                    const distractor = q.distractors[0] || "un autre concept";
+                    finalQ.question = `Vrai ou Faux ?\nLe mot manquant dans cet extrait est « ${distractor} » :\n\n« ${blankedSentence} »`;
+                    finalQ.correctValue = false;
+                }
+            }
+            else if (qType === 'input') {
+                const showHint = difficulty === 'debutant';
+                const hintStr = showHint ? targetWord.substring(0, Math.max(2, Math.floor(targetWord.length/3))) : "";
+                const blank = showHint ? `[ commence par "${hintStr}..." ]` : "_______";
+                
+                finalQ.question = `Quel mot clé précis manque dans cet extrait ?\n\n« ${q.sentence.replace(new RegExp(`\\b${targetWord}\\b`, 'gi'), blank)} »`;
+                finalQ.expected = targetWord;
+            }
+            return finalQ;
+        });
+
+        setCurrentQuiz({ questions: formattedQuestions, currentIndex: 0, answers: [], startTime: Date.now(), focusedAxis: axisId, difficulty: difficulty, format: format });
+        setQuizConfigModal(null); setView("quiz");
+      };
+
+      const handleAnswerSubmission = (answerData, isCorrect) => {
+        const q = currentQuiz.questions[currentQuiz.currentIndex];
+        setCurrentQuiz({ ...currentQuiz, answers: [...currentQuiz.answers, { question: q, userAnswer: answerData, isCorrect }] });
+      };
+
+      const normalize = (str) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+      const finishQuiz = async () => {
+        const correct = currentQuiz.answers.filter(a => a.isCorrect).length;
+        const total = currentQuiz.answers.length;
+        const percentage = Math.round((correct / total) * 100);
+        
+        if (percentage >= 60) confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+
+        const newProgress = { ...progress };
+        const newQuestions = [...questions];
+
+        currentQuiz.answers.forEach(a => {
+          const axisId = a.question.axisId;
+          newProgress[axisId].total += 1;
+          if (a.isCorrect) newProgress[axisId].correct += 1;
+          newProgress[axisId].mastery = Math.round((newProgress[axisId].correct / newProgress[axisId].total) * 100);
+
+          const qIndex = newQuestions.findIndex(q => q.id === a.question.id);
+          if (qIndex >= 0) {
+              newQuestions[qIndex] = { ...newQuestions[qIndex], timesAsked: (newQuestions[qIndex].timesAsked || 0) + 1, timesCorrect: (newQuestions[qIndex].timesCorrect || 0) + (a.isCorrect ? 1 : 0) };
+          }
+        });
+
+        const newHistory = [...history, { date: Date.now(), score: correct, total, percentage, difficulty: currentQuiz.difficulty }];
+        setProgress(newProgress); setHistory(newHistory); setQuestions(newQuestions);
+        await saveState({ progress: newProgress, history: newHistory, questions: newQuestions });
+        setView("results");
+      };
+
+      // ============ LOGIQUE MODE EXAMEN ============
+      const startExam = (axisId = null) => {
+        let pool = axisId ? examQuestions.filter(q => q.axisId === axisId) : [...examQuestions];
+        if (pool.length === 0) { setError("Pas de sujets d'examen générés."); return; }
+        const subject = pool[Math.floor(Math.random() * pool.length)];
+        setCurrentExam({ subject: subject, planText: "", phase: 0 });
+        setView("exam");
+      };
+
+      // ============ COMPOSANT VUE QUIZ ============
+      const QuizComponent = () => {
+        const q = currentQuiz.questions[currentQuiz.currentIndex];
+        const answered = currentQuiz.answers[currentQuiz.currentIndex];
+        const [textInput, setTextInput] = useState("");
+
+        useEffect(() => { setTextInput(""); }, [currentQuiz.currentIndex]);
+
+        const nextOrFinish = () => {
+            if (currentQuiz.currentIndex + 1 >= currentQuiz.questions.length) finishQuiz();
+            else setCurrentQuiz({...currentQuiz, currentIndex: currentQuiz.currentIndex + 1});
+        };
+
+        const renderQCM = () => (
+            <div className="grid grid-cols-1 gap-3">
+              {q.options.map((opt, i) => {
+                  let btnClass = "bg-white/60 border-transparent hover:bg-white hover:border-indigo-300";
+                  let icon = <span className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600">{i+1}</span>;
+                  if (answered) {
+                    if (i === q.correctIndex) { btnClass = "bg-green-100 border-green-400 text-green-900"; icon = <CheckCircle2 className="w-8 h-8 text-green-600"/>; }
+                    else if (answered.userAnswer === i) { btnClass = "bg-red-100 border-red-400 text-red-900"; icon = <XCircle className="w-8 h-8 text-red-600"/>; }
+                    else btnClass = "opacity-40 grayscale border-transparent";
+                  }
+                  return (
+                    <button key={i} disabled={!!answered} onClick={() => handleAnswerSubmission(i, i === q.correctIndex)} className={`w-full text-left p-5 border-2 rounded-2xl transition-all font-semibold text-lg flex items-center gap-4 ${btnClass}`}>
+                      {icon} {opt}
+                    </button>
+                  );
+              })}
+            </div>
+        );
+
+        const renderTF = () => (
+            <div className="flex gap-4">
+               {[{label: "Vrai", val: true}, {label: "Faux", val: false}].map(opt => {
+                   let btnClass = "bg-white/60 hover:bg-white border-transparent hover:border-indigo-300";
+                   if (answered) {
+                       if (opt.val === q.correctValue) btnClass = "bg-green-100 border-green-400 text-green-900";
+                       else if (answered.userAnswer === opt.val) btnClass = "bg-red-100 border-red-400 text-red-900";
+                       else btnClass = "opacity-40 grayscale border-transparent";
+                   }
+                   return (
+                     <button key={opt.label} disabled={!!answered} onClick={() => handleAnswerSubmission(opt.val, opt.val === q.correctValue)} className={`flex-1 p-6 border-2 rounded-2xl font-bold text-xl transition-all ${btnClass}`}>{opt.label}</button>
+                   );
+               })}
+            </div>
+        );
+
+        const renderInput = () => {
+            let statusClass = "border-indigo-200 focus:border-indigo-500 bg-white/70";
+            if (answered) statusClass = answered.isCorrect ? "border-green-400 bg-green-50 text-green-900" : "border-red-400 bg-red-50 text-red-900";
+            return (
+                <div className="space-y-4">
+                    <input type="text" value={textInput} onChange={e => setTextInput(e.target.value)} disabled={!!answered} placeholder="Tapez le mot exact..." className={`w-full p-6 text-xl rounded-2xl border-2 outline-none transition-all font-medium ${statusClass}`} autoFocus />
+                    {!answered && <button onClick={() => { handleAnswerSubmission(textInput, normalize(textInput) === normalize(q.expected)); }} className="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold hover:bg-indigo-700">Valider la réponse</button>}
+                </div>
+            );
+        };
+
+        const icons = { qcm: <HelpCircle className="w-5 h-5"/>, tf: <Target className="w-5 h-5"/>, input: <Type className="w-5 h-5"/> };
+        const labels = { qcm: "Choix Multiples", tf: "Vrai ou Faux", input: "Texte à trou" };
+
+        return (
+            <div className="max-w-3xl mx-auto w-full animate-in">
+                <div className="mb-6 flex justify-between items-center bg-white/40 px-4 py-2 rounded-full backdrop-blur-md border border-white/50 shadow-sm">
+                  <div className="text-sm font-bold text-indigo-900 flex items-center gap-3">
+                    Question {currentQuiz.currentIndex + 1} / {currentQuiz.questions.length}
+                    <span className="px-2 py-0.5 rounded bg-white text-indigo-600 uppercase tracking-widest text-[10px] shadow-sm">{currentQuiz.difficulty}</span>
+                  </div>
+                  <button onClick={() => setView(currentQuiz.focusedAxis ? "stats" : "dashboard")} className="text-indigo-500 hover:text-red-500 text-sm font-bold">Quitter</button>
+                </div>
+                
+                <div className="glass-panel p-8 md:p-12 rounded-3xl shadow-xl border border-white/60 relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">{icons[q.type]}</div>
+                  <div className="inline-flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider mb-6">
+                    {icons[q.type]} {labels[q.type]}
+                  </div>
+
+                  <h2 className="text-2xl font-bold leading-relaxed text-indigo-950 mb-8 whitespace-pre-wrap">{q.question}</h2>
+                  
+                  {q.type === 'qcm' && renderQCM()}
+                  {q.type === 'tf' && renderTF()}
+                  {q.type === 'input' && renderInput()}
+
+                  {answered && (
+                      <div className={`mt-6 p-4 rounded-2xl flex items-start gap-3 ${answered.isCorrect ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                          {answered.isCorrect ? <CheckCircle2 className="w-6 h-6 text-green-600 shrink-0"/> : <XCircle className="w-6 h-6 text-red-600 shrink-0"/>}
+                          <div>
+                              <div className={`font-bold ${answered.isCorrect ? 'text-green-900' : 'text-red-900'}`}>{answered.isCorrect ? "Correct !" : "Mauvaise réponse"}</div>
+                              <div className="text-sm mt-1 opacity-80">{q.explanation}</div>
+                          </div>
+                      </div>
+                  )}
+
+                  {answered && (
+                    <div className="mt-8 flex justify-end animate-in">
+                      <button onClick={nextOrFinish} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md">
+                        {currentQuiz.currentIndex + 1 >= currentQuiz.questions.length ? "Résultats" : "Suivante"} <ArrowRight className="w-5 h-5"/>
+                      </button>
+                    </div>
+                  )}
+                </div>
+            </div>
+        );
+      };
+
+      // ============ COMPOSANT VUE EXAMEN ============
+      const ExamComponent = () => {
+          if (!currentExam) return null;
+          const { subject, planText, phase } = currentExam;
+
+          const injectDialectique = () => setCurrentExam({...currentExam, planText: planText + "\nI. Thèse :\n\nII. Antithèse :\n\nIII. Synthèse :\n"});
+          const injectThematique = () => setCurrentExam({...currentExam, planText: planText + "\nI. Premier aspect (Définition/Causes) :\n\nII. Deuxième aspect (Conséquences/Impacts) :\n\nIII. Troisième aspect (Perspectives/Limites) :\n"});
+
+          return (
+             <div className="max-w-4xl mx-auto w-full animate-in">
+                <div className="mb-6 flex justify-between items-center bg-white/40 px-4 py-2 rounded-full backdrop-blur-md border border-white/50 shadow-sm">
+                  <div className="text-sm font-bold text-indigo-900 flex items-center gap-3">
+                    <PenTool className="w-4 h-4"/> Examen Blanc (Composition)
+                  </div>
+                  <button onClick={() => setView("dashboard")} className="text-indigo-500 hover:text-red-500 text-sm font-bold">Quitter</button>
+                </div>
+
+                <div className="glass-panel p-8 md:p-10 rounded-3xl shadow-xl border border-white/60 mb-6">
+                    <div className="text-sm font-bold text-indigo-500 uppercase tracking-widest mb-2">Sujet de réflexion</div>
+                    <h2 className="text-3xl font-extrabold text-indigo-950 mb-4">{subject.question}</h2>
+                    <div className="text-sm text-indigo-900/70 italic bg-white/50 p-3 rounded-lg border border-white/60">Ce sujet fait appel à vos connaissances sur le concept clé : <span className="font-bold">« {subject.concept} »</span>.</div>
+                </div>
+
+                {phase === 0 ? (
+                    <div className="glass-panel p-8 rounded-3xl shadow-xl border border-white/60 animate-in">
+                        <div className="flex justify-between items-end mb-4">
+                            <h3 className="text-lg font-bold text-indigo-900">Brouillon / Plan détaillé</h3>
+                            <div className="flex gap-2">
+                                <button onClick={injectDialectique} className="text-xs bg-white/60 hover:bg-white text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 font-bold transition-colors">Plan Dialectique</button>
+                                <button onClick={injectThematique} className="text-xs bg-white/60 hover:bg-white text-indigo-700 px-3 py-1.5 rounded-lg border border-indigo-200 font-bold transition-colors">Plan Thématique</button>
+                            </div>
+                        </div>
+                        <textarea 
+                            value={planText} 
+                            onChange={(e) => setCurrentExam({...currentExam, planText: e.target.value})}
+                            className="w-full h-80 p-6 text-lg rounded-2xl border-2 border-indigo-200 focus:border-indigo-500 outline-none bg-white/70 resize-none custom-scrollbar font-medium text-stone-700 mb-6"
+                            placeholder="Rédigez l'introduction et le plan détaillé de votre réponse ici..."
+                        ></textarea>
+                        
+                        <div className="flex justify-end">
+                            <button onClick={() => setCurrentExam({...currentExam, phase: 1})} disabled={planText.trim().length < 10} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md disabled:opacity-50">
+                                Terminer & Voir le corrigé <ArrowRight className="w-5 h-5"/>
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="glass-panel p-8 rounded-3xl shadow-xl border border-white/60 animate-in">
+                        <h3 className="text-2xl font-bold text-indigo-950 mb-6 flex items-center gap-2">
+                            <FileEdit className="w-6 h-6 text-indigo-600"/> Pistes de correction
+                        </h3>
+                        <p className="text-indigo-900/80 font-medium mb-6">Comparez votre plan avec les points clés extraits du cours original. Avez-vous pensé à aborder ces aspects ?</p>
+                        
+                        <div className="space-y-4 mb-8">
+                            {subject.references.map((ref, idx) => (
+                                <div key={idx} className="bg-white/80 p-5 rounded-2xl border border-indigo-100 shadow-sm relative pl-10">
+                                    <div className="absolute top-5 left-4 w-2 h-2 rounded-full bg-indigo-400"></div>
+                                    <p className="text-stone-700 font-medium italic">« {ref} »</p>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 text-center">
+                            <div className="font-bold text-indigo-900 mb-4">Auto-évaluation de votre plan :</div>
+                            <div className="flex flex-wrap justify-center gap-4">
+                                <button onClick={() => setView("dashboard")} className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors shadow-sm"><CheckCircle2 className="w-5 h-5"/> J'avais les bons arguments</button>
+                                <button onClick={() => setView("dashboard")} className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-colors shadow-sm"><XCircle className="w-5 h-5"/> J'ai manqué des points cruciaux</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+             </div>
+          );
+      };
+
+      // ============ RENDUS GENERAUX ============
+      const globalMastery = useMemo(() => {
+        const values = Object.values(progress).filter(p => p.total > 0);
+        return values.length ? Math.round(values.reduce((s, p) => s + p.mastery, 0) / values.length) : 0;
+      }, [progress]);
+
+      const studyLevel = useMemo(() => {
+        const totalAnswers = Object.values(progress).reduce((acc, p) => acc + p.total, 0);
+        if (totalAnswers === 0) return { title: "Nouveau venu 🥚", desc: "Lancez votre premier quiz !", color: "text-stone-500", bg: "bg-stone-100", bar: "bg-stone-500" };
+        if (globalMastery < 40) return { title: "Débutant 🌱", desc: "Les fondations se mettent en place. Ne lâchez rien !", color: "text-green-600", bg: "bg-green-100", bar: "bg-green-500" };
+        if (globalMastery < 70) return { title: "Intermédiaire 📘", desc: "Bonne compréhension globale. On vise la perfection !", color: "text-blue-600", bg: "bg-blue-100", bar: "bg-blue-500" };
+        if (globalMastery < 90) return { title: "Avancé 🔥", desc: "Très solide ! Ce sujet n'a presque plus de secrets.", color: "text-orange-600", bg: "bg-orange-100", bar: "bg-orange-500" };
+        return { title: "Expert 👑", desc: "Maîtrise absolue. Vous pourriez donner le cours !", color: "text-yellow-600", bg: "bg-yellow-100", bar: "bg-yellow-500" };
+      }, [globalMastery, progress]);
+
+      const sortedWeaknesses = useMemo(() => {
+        return [...axes].sort((a, b) => {
+          const pA = progress[a.id] || { mastery: 0, total: 0 };
+          const pB = progress[b.id] || { mastery: 0, total: 0 };
+          const scoreA = pA.total === 0 ? 50 : pA.mastery;
+          const scoreB = pB.total === 0 ? 50 : pB.mastery;
+          return scoreA - scoreB;
+        });
+      }, [axes, progress]);
+
+      const askedQuestions = useMemo(() => {
+          return [...questions]
+              .filter(q => (q.timesAsked || 0) > 0)
+              .sort((a, b) => (a.timesCorrect / a.timesAsked) - (b.timesCorrect / b.timesAsked));
+      }, [questions]);
+
+      const masteredChaptersPct = Math.round((axes.filter(a => (progress[a.id]?.mastery || 0) >= 60).length / Math.max(1, axes.length)) * 100);
+      const exploredConceptsPct = Math.round((questions.filter(q => (q.timesAsked || 0) > 0).length / Math.max(1, questions.length)) * 100);
+
+      const resetAll = async () => {
+        if (!confirm("Tout effacer ?")) return;
+        await window.storage.delete("revision_state_v8");
+        setPdfFile(null); setAxes([]); setProgress({}); setQuestions([]); setExamQuestions([]); setHistory([]); setExtractionMode(null); setView("home");
+      };
+
+      return (
+        <div className="animated-bg text-stone-900 relative overflow-hidden flex flex-col min-h-screen">
+          
+          {/* MODALE DE CONFIGURATION DU QUIZ */}
+          {quizConfigModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-indigo-950/40 backdrop-blur-sm animate-in">
+               <div className="glass-panel w-full max-w-xl p-8 rounded-3xl shadow-2xl border border-white/60">
+                  <h2 className="text-2xl font-bold text-indigo-950 mb-8 text-center">Configuration de la session</h2>
+                  
+                  <div className="space-y-8">
+                    <div>
+                      <h3 className="text-sm font-bold text-indigo-900 uppercase tracking-wider mb-4">1. Niveau de difficulté</h3>
+                      <div className="grid grid-cols-3 gap-3">
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, difficulty: 'debutant'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.difficulty === 'debutant' ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <div className="text-2xl mb-2">🌱</div><div className="font-bold text-green-700 text-sm">Débutant</div>
+                        </button>
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, difficulty: 'intermediaire'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.difficulty === 'intermediaire' ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <div className="text-2xl mb-2">📘</div><div className="font-bold text-blue-700 text-sm">Standard</div>
+                        </button>
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, difficulty: 'expert'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.difficulty === 'expert' ? 'border-orange-500 bg-orange-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <div className="text-2xl mb-2">🔥</div><div className="font-bold text-orange-700 text-sm">Expert</div>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="text-sm font-bold text-indigo-900 uppercase tracking-wider mb-4">2. Format des questions</h3>
+                      <div className="grid grid-cols-3 gap-3">
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, format: 'qcm'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.format === 'qcm' ? 'border-indigo-500 bg-indigo-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <HelpCircle className={`w-8 h-8 mb-2 ${quizConfigModal.format === 'qcm' ? 'text-indigo-600' : 'text-indigo-400'}`}/><div className="font-bold text-indigo-900 text-sm">QCM</div>
+                        </button>
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, format: 'input'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.format === 'input' ? 'border-indigo-500 bg-indigo-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <Type className={`w-8 h-8 mb-2 ${quizConfigModal.format === 'input' ? 'text-indigo-600' : 'text-indigo-400'}`}/><div className="font-bold text-indigo-900 text-sm">Texte à trou</div>
+                        </button>
+                        <button onClick={() => setQuizConfigModal({...quizConfigModal, format: 'mix'})} 
+                          className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center ${quizConfigModal.format === 'mix' ? 'border-indigo-500 bg-indigo-50 shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'}`}>
+                          <Sparkles className={`w-8 h-8 mb-2 ${quizConfigModal.format === 'mix' ? 'text-indigo-600' : 'text-indigo-400'}`}/><div className="font-bold text-indigo-900 text-sm">Mixte</div>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-10 flex gap-4">
+                    <button onClick={() => setQuizConfigModal(null)} className="flex-1 py-4 font-bold text-indigo-500 hover:text-red-500 transition-colors">Annuler</button>
+                    <button onClick={() => startQuiz(quizConfigModal.axisId, quizConfigModal.difficulty, quizConfigModal.format)} className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2">
+                       Démarrer le Quiz <ArrowRight className="w-5 h-5"/>
+                    </button>
+                  </div>
+               </div>
+            </div>
+          )}
+
+          <header className="glass-header sticky top-0 z-20">
+            <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3 cursor-pointer hover:scale-105 transition-transform" onClick={() => axes.length > 0 && setView("dashboard")}>
+                <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 text-white flex items-center justify-center rounded-xl shadow-lg">
+                  <GraduationCap className="w-6 h-6" />
+                </div>
+                <div className="font-extrabold text-xl tracking-tight text-indigo-900">XoXo <span className="text-purple-600">Révision</span></div>
+              </div>
+              {axes.length > 0 && (
+                <div className="flex gap-3">
+                   <button onClick={() => setView("dashboard")} className={`p-2.5 rounded-lg font-bold flex gap-2 items-center transition-all ${view === 'dashboard' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white/50 text-indigo-900 hover:bg-white/80'}`}>
+                     <Home className="w-5 h-5"/> <span className="hidden sm:inline">Accueil</span>
+                   </button>
+                   <button onClick={() => setView("stats")} className={`p-2.5 rounded-lg font-bold flex gap-2 items-center transition-all ${view === 'stats' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white/50 text-indigo-900 hover:bg-white/80'}`}>
+                     <PieChart className="w-5 h-5"/> <span className="hidden sm:inline">Stats</span>
+                   </button>
+                   <button onClick={resetAll} className="p-2.5 bg-red-100/50 text-red-600 rounded-lg hover:bg-red-200/80 transition-all ml-2"><Trash2 className="w-5 h-5"/></button>
+                </div>
+              )}
+            </div>
+          </header>
+
+          <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-10 relative z-10">
+            {error && (
+              <div className="mb-6 p-4 glass-panel border-l-4 border-red-500 text-red-700 flex items-center gap-3 animate-in">
+                <AlertCircle className="w-6 h-6" /> {error}
+                <button onClick={() => setError(null)} className="ml-auto"><XCircle className="w-5 h-5" /></button>
+              </div>
+            )}
+
+            {view === "home" && (
+              <div className="text-center py-10 animate-in">
+                <h1 className="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight text-indigo-950">
+                  L'Outil de <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-500">Révision Intégrale.</span>
+                </h1>
+                <p className="text-xl text-indigo-900/80 mb-12 max-w-2xl mx-auto font-medium">
+                  Uploadez votre cours. Entraînez-vous avec des Quiz rapides, ou passez en Mode Examen pour rédiger vos propres plans détaillés.
+                </p>
+                <label className="block max-w-xl mx-auto cursor-pointer group">
+                  <input type="file" accept="application/pdf" onChange={handleFileUpload} className="hidden" />
+                  <div className="glass-panel border-2 border-dashed border-indigo-300 group-hover:border-purple-500 group-hover:bg-white/60 p-16 text-center rounded-3xl transition-all group-hover:scale-105 shadow-md">
+                    <Upload className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
+                    <div className="text-2xl font-bold text-indigo-950">Glissez votre PDF ici</div>
+                  </div>
+                </label>
+              </div>
+            )}
+
+            {view === "loading" && (
+              <div className="text-center py-20 animate-in glass-panel rounded-3xl max-w-md mx-auto p-12 shadow-xl">
+                <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mx-auto mb-6" />
+                <h2 className="text-2xl font-bold text-indigo-950 mb-2">{loadingMsg}</h2>
+              </div>
+            )}
+
+            {view === "dashboard" && (
+              <div className="animate-in w-full">
+                <div className="glass-panel p-8 rounded-3xl mb-10 shadow-lg border border-white/60">
+                  <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-6">
+                    <div>
+                      <div className="inline-flex items-center gap-2 bg-indigo-100/50 text-indigo-800 px-3 py-1 rounded-full text-sm font-semibold mb-3">
+                        <FileText className="w-4 h-4"/> {pdfFile?.name}
+                      </div>
+                      <h1 className="text-4xl font-extrabold text-indigo-950 mb-2">Vos Révisions</h1>
+                    </div>
+                    
+                    <div className="flex gap-6 items-center flex-wrap justify-end">
+                      <div className="text-center hidden sm:block">
+                        <div className="text-4xl font-black text-indigo-600">{globalMastery}%</div>
+                        <div className="text-xs font-bold text-indigo-900 uppercase mt-1">Maîtrise Globale</div>
+                      </div>
+                      <div className="h-16 w-px bg-indigo-200 hidden sm:block"></div>
+                      
+                      <div className="flex gap-3">
+                          <button onClick={() => setQuizConfigModal({ axisId: null, difficulty: 'intermediaire', format: 'mix' })} className="bg-white text-indigo-600 border border-indigo-200 px-6 py-4 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-50 transition-colors shadow-sm">
+                            <Sparkles className="w-5 h-5"/> Quiz Rapide
+                          </button>
+                          
+                          <button onClick={() => startExam(null)} className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-4 rounded-xl font-bold flex items-center gap-2 hover:scale-105 transition-transform shadow-lg">
+                            <PenTool className="w-5 h-5"/> Examen Blanc
+                          </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in animate-in-delay-1">
+                  {axes.map((axis) => {
+                    const p = progress[axis.id] || { correct: 0, total: 0, mastery: 0 };
+                    return (
+                      <div key={axis.id} className="glass-panel p-6 rounded-3xl border border-white/60 flex flex-col hover:-translate-y-2 hover:shadow-xl transition-all duration-300">
+                        <div className="flex items-start justify-between mb-4"><span className="text-4xl">{axis.emoji}</span></div>
+                        <h3 className="text-xl font-extrabold text-indigo-950 leading-tight" title={axis.title}>{axis.title}</h3>
+                        <p className="text-sm text-indigo-800/70 font-medium mt-1 mb-6">{axis.desc}</p>
+                        
+                        <div className="mt-auto">
+                          <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2 uppercase">
+                            <span>{p.correct}/{p.total} réussites</span>
+                            <span>{p.mastery}%</span>
+                          </div>
+                          <div className="h-2.5 bg-indigo-100 rounded-full mb-6 overflow-hidden">
+                             <div className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-1000" style={{width: `${p.mastery}%`}}></div>
+                          </div>
+                          
+                          <div className="flex gap-2">
+                              <button onClick={() => setQuizConfigModal({ axisId: axis.id, difficulty: 'intermediaire', format: 'mix' })} className="flex-1 py-3 bg-white/60 hover:bg-white text-indigo-900 border border-indigo-100 rounded-xl font-bold transition-colors flex justify-center items-center gap-2">
+                                Quiz
+                              </button>
+                              <button onClick={() => startExam(axis.id)} className="flex-1 py-3 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 rounded-xl font-bold transition-colors flex justify-center items-center gap-2" title="Sujet de rédaction">
+                                <PenTool className="w-4 h-4"/> Examen
+                              </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ============== ONGLET STATISTIQUES RESTAURÉ ================ */}
+            {view === "stats" && (
+              <div className="animate-in w-full">
+                <div className="text-center mb-10">
+                  <h1 className="text-4xl font-extrabold text-indigo-950 mb-3">Statistiques & Analyse</h1>
+                </div>
+
+                {/* LES 3 DONUTS */}
+                <div className="glass-panel p-10 rounded-3xl shadow-lg border border-white/60 mb-10">
+                  <h2 className="text-2xl font-bold text-indigo-950 mb-8 flex items-center justify-center gap-2">
+                    <PieChart className="w-6 h-6 text-indigo-600"/> Vue d'Ensemble
+                  </h2>
+                  <div className="flex flex-wrap justify-center gap-12 md:gap-24">
+                     <DonutChart percentage={globalMastery} colorClass="text-indigo-500" label="Réussite Globale" />
+                     <DonutChart percentage={masteredChaptersPct} colorClass="text-green-500" label="Chapitres Validés" />
+                     <DonutChart percentage={exploredConceptsPct} colorClass="text-orange-500" label="Concepts Explorés" />
+                  </div>
+                </div>
+
+                {/* NIVEAU D'ÉTUDE ET CHIFFRES CLÉS */}
+                <div className="grid md:grid-cols-3 gap-6 mb-10">
+                  <div className={`md:col-span-2 glass-panel p-8 rounded-3xl shadow-lg border border-white/60 relative overflow-hidden`}>
+                    <div className="flex items-center gap-3 mb-2 text-indigo-900 font-bold uppercase tracking-wider text-sm"><Target className="w-5 h-5"/> Votre Niveau d'Étude</div>
+                    <h2 className={`text-4xl font-black mb-2 ${studyLevel.color}`}>{studyLevel.title}</h2>
+                    <p className="text-indigo-900/80 font-medium text-lg mb-8">{studyLevel.desc}</p>
+                    <div className="flex justify-between text-xs font-bold text-indigo-900 mb-2 uppercase">
+                      <span>Progression globale</span>
+                      <span>{globalMastery}% / 100%</span>
+                    </div>
+                    <div className="h-4 bg-indigo-100 rounded-full overflow-hidden shadow-inner">
+                       <div className={`h-full ${studyLevel.bar} transition-all duration-1000`} style={{width: `${globalMastery}%`}}></div>
+                    </div>
+                  </div>
+
+                  <div className="glass-panel p-8 rounded-3xl shadow-lg border border-white/60 flex flex-col justify-center">
+                    <div className="space-y-6 text-center md:text-left">
+                      <div>
+                        <div className="text-sm font-bold text-indigo-900/70 uppercase mb-1">Quiz terminés</div>
+                        <div className="text-4xl font-black text-indigo-950">{history.length}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold text-indigo-900/70 uppercase mb-1">Total questions</div>
+                        <div className="text-4xl font-black text-indigo-950">{Object.values(progress).reduce((acc, p) => acc + p.total, 0)}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ALERTE POINTS FAIBLES */}
+                {sortedWeaknesses.length > 0 && progress[sortedWeaknesses[0].id]?.total > 0 && progress[sortedWeaknesses[0].id].mastery < 60 && (
+                    <div className="bg-red-50 border border-red-200 rounded-3xl p-6 mb-10 flex flex-col md:flex-row items-center justify-between gap-6 shadow-md">
+                      <div className="flex gap-4 items-center">
+                        <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shrink-0"><ShieldAlert className="w-6 h-6"/></div>
+                        <div>
+                          <h3 className="font-bold text-red-900 text-lg">Attention requise sur : {sortedWeaknesses[0].title}</h3>
+                          <p className="text-red-700/80 font-medium">Votre maîtrise n'est que de {progress[sortedWeaknesses[0].id].mastery}%. Une petite session s'impose !</p>
+                        </div>
+                      </div>
+                      <button onClick={() => setQuizConfigModal({ axisId: sortedWeaknesses[0].id, difficulty: 'intermediaire', format: 'mix' })} className="shrink-0 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-md hover:scale-105 transition-all">
+                        <RotateCcw className="w-5 h-5"/> Réviser en urgence
+                      </button>
+                    </div>
+                )}
+
+                {/* DÉTAIL PAR CHAPITRE */}
+                <h2 className="text-2xl font-bold text-indigo-950 mb-6 flex items-center gap-2">
+                  <TrendingDown className="w-6 h-6 text-red-500"/> Vos points faibles par chapitre
+                </h2>
+                <div className="glass-panel p-8 rounded-3xl shadow-lg border border-white/60 mb-10">
+                  <div className="space-y-4">
+                    {sortedWeaknesses.map((axis) => {
+                      const p = progress[axis.id] || { correct: 0, total: 0, mastery: 0 };
+                      const colorClass = p.total === 0 ? "bg-stone-300" : p.mastery >= 70 ? "bg-green-500" : p.mastery >= 40 ? "bg-orange-400" : "bg-red-500";
+                      
+                      return (
+                        <div key={axis.id} className="flex items-center gap-4 bg-white/40 p-4 rounded-2xl">
+                          <div className="text-2xl w-10 text-center">{axis.emoji}</div>
+                          <div className="flex-1">
+                            <div className="flex justify-between mb-1">
+                              <span className="font-bold text-indigo-950 truncate max-w-[200px] sm:max-w-md" title={axis.title}>{axis.title}</span>
+                              <span className="font-bold text-indigo-900">{p.total > 0 ? `${p.mastery}%` : '-'}</span>
+                            </div>
+                            <div className="h-2 bg-indigo-100 rounded-full overflow-hidden">
+                               <div className={`h-full ${colorClass} transition-all duration-1000`} style={{width: `${p.total > 0 ? p.mastery : 0}%`}}></div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DÉTAIL PAR CONCEPT */}
+                <h2 className="text-2xl font-bold text-indigo-950 mb-6 mt-12 flex items-center gap-2">
+                  <ClipboardList className="w-6 h-6 text-indigo-600"/> Maîtrise détaillée par Concept
+                </h2>
+                <div className="glass-panel rounded-3xl shadow-lg border border-white/60 mb-10 overflow-hidden">
+                  <div className="max-h-[600px] overflow-y-auto p-6 space-y-4 custom-scrollbar bg-white/20">
+                    {askedQuestions.length > 0 ? askedQuestions.map((q, idx) => {
+                      const rate = Math.round((q.timesCorrect / q.timesAsked) * 100);
+                      const colorClass = rate >= 70 ? "bg-green-500" : rate >= 40 ? "bg-orange-400" : "bg-red-500";
+                      const textClass = rate >= 70 ? "text-green-800" : rate >= 40 ? "text-orange-800" : "text-red-800";
+                      const bgClass = rate >= 70 ? "bg-green-50/80" : rate >= 40 ? "bg-orange-50/80" : "bg-red-50/80";
+                      const axis = axes.find(a => a.id === q.axisId);
+
+                      return (
+                        <div key={idx} className={`p-5 rounded-2xl border ${bgClass} border-white/40 shadow-sm flex flex-col md:flex-row gap-4 items-start md:items-center hover:-translate-y-1 transition-transform`}>
+                           <div className="flex-1">
+                             <div className="flex items-center gap-3 mb-3">
+                                <span className="px-3 py-1 bg-white/80 rounded-lg text-xs font-bold text-indigo-900 shadow-sm whitespace-nowrap">{axis?.title || "Concept"}</span>
+                                <span className={`px-3 py-1 rounded-lg text-xs font-bold shadow-sm bg-white/80 ${textClass}`}>Mot clé : {q.targetWord}</span>
+                             </div>
+                             <p className="text-sm font-medium text-indigo-950/80 leading-relaxed italic">« ...{q.sentence}... »</p>
+                           </div>
+                           <div className="w-full md:w-48 shrink-0 bg-white/60 p-3 rounded-xl shadow-inner border border-white/40">
+                              <div className="flex justify-between text-xs font-bold text-indigo-950 mb-2">
+                                <span>{q.timesCorrect} / {q.timesAsked}</span>
+                                <span>{rate}%</span>
+                              </div>
+                              <div className="h-2.5 bg-black/5 rounded-full overflow-hidden">
+                                 <div className={`h-full ${colorClass} transition-all duration-1000`} style={{width: `${rate}%`}}></div>
+                              </div>
+                           </div>
+                        </div>
+                      )
+                    }) : (
+                      <div className="text-center py-10 text-indigo-900/60 font-medium">Répondez à quelques questions pour voir l'analyse détaillée apparaître ici !</div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {view === "quiz" && currentQuiz && <QuizComponent />}
+            {view === "exam" && currentExam && <ExamComponent />}
+
+            {view === "results" && currentQuiz && (() => {
+              const score = Math.round((currentQuiz.answers.filter(a => a.isCorrect).length / currentQuiz.answers.length) * 100);
+              return (
+                <div className="max-w-2xl mx-auto text-center animate-in">
+                  <div className="glass-panel p-12 rounded-[3rem] shadow-xl border border-white/60">
+                    <Award className={`w-20 h-20 mx-auto mb-6 ${score >= 60 ? 'text-green-500' : 'text-orange-500'}`} />
+                    <div className="text-sm font-bold uppercase tracking-widest text-indigo-500 mb-2">Score de la session</div>
+                    <div className="text-8xl font-black mb-8 text-indigo-950">{score}%</div>
+                    <div className="flex justify-center gap-4">
+                      <button onClick={() => setQuizConfigModal({ axisId: currentQuiz.focusedAxis, difficulty: currentQuiz.difficulty, format: currentQuiz.format })} className="bg-indigo-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-lg">Rejouer</button>
+                      <button onClick={() => setView("dashboard")} className="bg-white/60 text-indigo-900 px-8 py-4 rounded-xl font-bold hover:bg-white transition-colors">Accueil</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </main>
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<RevisionApp />);
+  </script>
+</body>
+</html>
